@@ -219,13 +219,20 @@ const App: React.FC = () => {
     setTryOnStatus(GenerationStatus.PROCESSING);
     setTryOnError(null);
     try {
-      // Pass the tryOnMode to the service
-      const promises = Array.from({ length: tryOnCount }).map(() => 
-        generateVirtualTryOn(personImage, garmentImage, garmentDetailImage, accessoryImage, instructions, tryOnAspectRatio, tryOnImageSize, modelName, tryOnMode)
+      // FIX: Call the service once with tryOnCount, do NOT use .map() here
+      const results = await generateVirtualTryOn(
+        personImage, 
+        garmentImage, 
+        garmentDetailImage, 
+        accessoryImage, 
+        instructions, 
+        tryOnAspectRatio, 
+        tryOnImageSize, 
+        modelName, 
+        tryOnMode,
+        tryOnCount // Pass count directly to service
       );
-      const allResults = await Promise.all(promises);
-      const flatResults = allResults.flat();
-      setTryOnResult(flatResults);
+      setTryOnResult(results);
       setTryOnStatus(GenerationStatus.COMPLETED);
     } catch (err: any) {
       setTryOnStatus(GenerationStatus.FAILED);

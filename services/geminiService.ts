@@ -96,47 +96,44 @@ const executeSingleTryOn = async (
   if (!apiKey) return null;
 
   const ai = new GoogleGenAI({ apiKey });
-  const isAccessoryAdd = !!accessoryImage;
 
   let modeSpecificPrompt = "";
 
   switch (tryOnMode) {
     case 'keep-model-bg':
       modeSpecificPrompt = `
-        - **MASTER TEMPLATE**: Use **IMAGE 1** as the absolute base.
-        - **SCENE PRESERVATION**: Keep the background, lighting, and environment of **IMAGE 1** 100% identical.
-        - **CLOTHING SWAP**: Only change the garment of the person in **IMAGE 1** to match the garment shown in **IMAGE 2**.
-        - **POSE**: Maintain the exact pose and body position from **IMAGE 1**.
+        - **MANDATORY CANVAS**: Use **IMAGE 1** (Person Upload) as the base layer.
+        - **ZERO BACKGROUND CHANGE**: You MUST NOT change any pixels in the background or surroundings of **IMAGE 1**. 
+        - **SWAP TARGET**: Only modify the clothing area of the person in **IMAGE 1**. Replace the existing clothes with the garment from **IMAGE 2**.
+        - **CONSISTENCY**: Keep the original model's pose, hair, skin tone, and environment exactly as they appear in **IMAGE 1**.
       `;
       break;
     case 'new-bg':
       modeSpecificPrompt = `
-        - **SUBJECT**: Use the person's identity and face from **IMAGE 1**.
-        - **CLOTHING**: Dress them in the garment from **IMAGE 2**.
-        - **BACKGROUND**: Completely ignore the backgrounds of both images. Place the subject in a professional high-end fashion studio with clean lighting.
+        - **IDENTITY**: Take the person's face and body shape from **IMAGE 1**.
+        - **OUTFIT**: Dress them in the garment from **IMAGE 2**.
+        - **NEW SCENE**: Place them in a professional high-fashion studio background with soft bokeh.
       `;
       break;
     case 'keep-garment-bg':
       modeSpecificPrompt = `
-        - **MASTER TEMPLATE**: Use **IMAGE 2** as the absolute base for the scene.
-        - **SCENE PRESERVATION**: Keep the background, environment, and pose of the person in **IMAGE 2** 100% identical.
-        - **IDENTITY SWAP**: Transfer only the facial features and physical identity of the person from **IMAGE 1** onto the person in **IMAGE 2**.
-        - **CLOTHING**: Keep the garment exactly as shown in **IMAGE 2**.
+        - **MANDATORY CANVAS**: Use **IMAGE 2** (Garment/Model) as the base layer.
+        - **IDENTITY TRANSFER**: Keep the background and the clothes in **IMAGE 2** exactly as they are. 
+        - **FACE SWAP**: Only replace the face of the person in **IMAGE 2** with the face of the person from **IMAGE 1**.
       `;
       break;
   }
 
   const basePrompt = `
-    You are an advanced AI fashion editor.
+    Role: Professional AI Fashion Retoucher.
     
     ${modeSpecificPrompt}
     
-    Common Requirements:
-    - **Face Identity**: The final face must be a perfect match for the person in **IMAGE 1**.
-    - **Facial Expression**: Give the person a natural, gentle, and pleasant smile (mỉm cười nhẹ nhàng).
-    - **Realism**: Ensure textures, fabric folds, and shadows look 100% photorealistic.
-    - Output Resolution: ${imageSize}.
-    ${instructions ? `- Extra Instruction: ${instructions}` : ''}
+    Technical Details:
+    - Result must be photorealistic, 100% natural fabric folds and lighting.
+    - Give the person a very gentle, friendly smile (mỉm cười nhẹ nhàng).
+    - Resolution: ${imageSize}.
+    ${instructions ? `- User note: ${instructions}` : ''}
   `;
 
   const parts: any[] = [
@@ -169,7 +166,7 @@ const executeSingleTryOn = async (
     
     return extractImageFromResponse(response);
   } catch (error: any) {
-    console.warn("Single Try-On failed:", error);
+    console.warn("Try-on generation failed:", error);
     return null;
   }
 };
@@ -183,17 +180,21 @@ export const generateVirtualTryOn = async (
   aspectRatio: string = "9:16",
   imageSize: string = "2K",
   modelName: string = "gemini-3-pro-image-preview",
-  tryOnMode: string = 'keep-model-bg'
+  tryOnMode: string = 'keep-model-bg',
+  count: number = 2 // New parameter to control batch count
 ): Promise<string[]> => {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("Thiếu API Key.");
 
-  // We run 2 generations to give user choice
-  const promises = [1, 2].map(() => executeSingleTryOn(personImage, garmentImage, garmentDetailImage, accessoryImage, instructions, aspectRatio, imageSize, modelName, tryOnMode));
-  const results = await Promise.all(promises);
+  // Create an array of tasks based on the count requested
+  const tasks = Array.from({ length: count }).map(() => 
+    executeSingleTryOn(personImage, garmentImage, garmentDetailImage, accessoryImage, instructions, aspectRatio, imageSize, modelName, tryOnMode)
+  );
+  
+  const results = await Promise.all(tasks);
   const validResults = results.filter((r): r is string => r !== null);
 
-  if (validResults.length === 0) throw new Error("Google AI không thể tạo ảnh lúc này. Thử lại sau.");
+  if (validResults.length === 0) throw new Error("Google AI không thể tạo ảnh. Vui lòng thử lại.");
   return validResults;
 };
 
@@ -211,10 +212,9 @@ export const changeImageBackground = async (
   const ai = new GoogleGenAI({ apiKey });
 
   const prompt = `
-    Task: Replace background.
-    - Keep subject from original image.
-    - **FACE**: Ensure natural gentle smile.
-    ${customBgImage ? '- Use Target Background Image.' : `- Prompt: ${backgroundPrompt}`}
+    Replace background of image.
+    Keep subject identical. Natural gentle smile.
+    ${customBgImage ? 'Use custom background provided.' : `Theme: ${backgroundPrompt}`}
   `;
 
   const parts: any[] = [{ inlineData: { mimeType: 'image/png', data: cleanBase64(imageDataUrl) } }];
@@ -223,11 +223,9 @@ export const changeImageBackground = async (
   parts.push({ text: prompt });
 
   try {
-    const response = await retry<GenerateContentResponse>(() => ai.models.generateContent({
-      model: modelName,
-      contents: { parts: parts },
-      config: { imageConfig: { aspectRatio } }
-    }));
+    const config: any = { imageConfig: { aspectRatio } };
+    if (modelName === 'gemini-3-pro-image-preview') config.imageConfig.imageSize = imageSize;
+    const response = await ai.models.generateContent({ model: modelName, contents: { parts }, config });
     return extractImageFromResponse(response);
   } catch (error) { handleError(error); return ""; }
 };
@@ -241,9 +239,8 @@ export const changeImageBackgroundBatch = async (
   modelName: string = "gemini-3-pro-image-preview",
   customBgImage: ImageAsset | null = null
 ): Promise<string[]> => {
-  const promises = prompts.map(p => changeImageBackground(imageDataUrl, p, detailImage, aspectRatio, imageSize, modelName, customBgImage).catch(() => null));
-  const res = await Promise.all(promises);
-  return res.filter((r): r is string => r !== null);
+  const results = await Promise.all(prompts.map(p => changeImageBackground(imageDataUrl, p, detailImage, aspectRatio, imageSize, modelName, customBgImage).catch(() => null)));
+  return results.filter((r): r is string => r !== null);
 };
 
 export const changeImageBackgroundAndPoseBatch = async (
@@ -268,12 +265,9 @@ export const analyzeOutfit = async (image: ImageAsset, detailImage: ImageAsset |
   const ai = new GoogleGenAI({ apiKey });
   const parts: any[] = [{ inlineData: { mimeType: image.mimeType, data: cleanBase64(image.data) } }];
   if (detailImage) parts.push({ inlineData: { mimeType: detailImage.mimeType, data: cleanBase64(detailImage.data) } });
-  parts.push({ text: "Analyze person and outfit." });
+  parts.push({ text: "Analyze person and outfit details." });
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3-pro-preview', 
-    contents: { parts: parts }
-  });
+  const response = await ai.models.generateContent({ model: 'gemini-3-pro-preview', contents: { parts } });
   return response.text || "";
 };
 
@@ -285,7 +279,7 @@ export const generatePromptsFromAnalysis = async (analysis: string, count: numbe
     model: 'gemini-3-pro-preview',
     contents: analysis,
     config: {
-      systemInstruction: `Generate ${count} video prompts. JSON.`,
+      systemInstruction: `Generate ${count} video prompts. JSON format.`,
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,
