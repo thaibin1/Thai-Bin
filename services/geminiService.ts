@@ -60,21 +60,43 @@ const retry = async <T>(fn: () => Promise<T>, maxRetries = 3, initialDelay = 200
 };
 
 const extractImageFromResponse = (response: any): string => {
-  const parts = response.candidates?.[0]?.content?.parts;
-  if (!parts) throw new Error("Không có nội dung nào được tạo ra.");
+  const candidate = response.candidates?.[0];
+  
+  if (!candidate) {
+    throw new Error("API không trả về kết quả nào. Kiểm tra kết nối mạng.");
+  }
+
+  const safetyRatings = candidate.safetyRatings || [];
+  const blockedRating = safetyRatings.find((r: any) => r.blocked === true);
+
+  if (candidate.finishReason === 'SAFETY' || blockedRating) {
+    throw new Error("Hình ảnh bị chặn bởi bộ lọc an toàn. Vui lòng thử ảnh khác ít nhạy cảm hơn.");
+  }
+
+  const parts = candidate.content?.parts;
+  if (!parts || parts.length === 0) {
+    throw new Error("AI không tạo được ảnh. Vui lòng thử lại.");
+  }
+  
   for (const part of parts) {
     if (part.inlineData && part.inlineData.data) {
       return `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
     }
   }
-  throw new Error("Không tìm thấy dữ liệu hình ảnh trong phản hồi.");
+  
+  const textPart = parts.find((p: any) => p.text);
+  if (textPart) {
+    throw new Error(`Thông báo từ AI: ${textPart.text}`);
+  }
+
+  throw new Error("Không tìm thấy dữ liệu hình ảnh.");
 };
 
 const handleError = (error: any) => {
   console.error("Gemini API Error:", error);
   const errorMsg = error.message || "";
   if (errorMsg.includes('404') || errorMsg.includes('not found') || errorMsg.includes('API key')) {
-       throw new Error("Lỗi xác thực: Key không hợp lệ hoặc dự án chưa liên kết thanh toán.");
+       throw new Error("Lỗi API Key: Vui lòng kiểm tra lại key hoặc dự án.");
   }
   throw new Error(errorMsg || "Xử lý thất bại.");
 };
@@ -98,42 +120,47 @@ const executeSingleTryOn = async (
   const ai = new GoogleGenAI({ apiKey });
 
   let modeSpecificPrompt = "";
-
   switch (tryOnMode) {
     case 'keep-model-bg':
       modeSpecificPrompt = `
-        - **MANDATORY CANVAS**: Use **IMAGE 1** (Person Upload) as the base layer.
-        - **ZERO BACKGROUND CHANGE**: You MUST NOT change any pixels in the background or surroundings of **IMAGE 1**. 
-        - **SWAP TARGET**: Only modify the clothing area of the person in **IMAGE 1**. Replace the existing clothes with the garment from **IMAGE 2**.
-        - **CONSISTENCY**: Keep the original model's pose, hair, skin tone, and environment exactly as they appear in **IMAGE 1**.
+        - GOAL: Dress the person in IMAGE 1 with the outfit from IMAGE 2.
+        - PRIMARY SOURCE (Person & BG): IMAGE 1 is the template for body, face, pose, and background.
+        - SECONDARY SOURCE (Garment): IMAGE 2 is the clothing to use.
+        - TASK: Replace the existing clothing in IMAGE 1 with the clothing from IMAGE 2. 
+        - CONSTRAINT: Keep 100% of the original background and person's identity from IMAGE 1.
       `;
       break;
     case 'new-bg':
       modeSpecificPrompt = `
-        - **IDENTITY**: Take the person's face and body shape from **IMAGE 1**.
-        - **OUTFIT**: Dress them in the garment from **IMAGE 2**.
-        - **NEW SCENE**: Place them in a professional high-fashion studio background with soft bokeh.
+        - GOAL: Professional studio fashion photography.
+        - SOURCE 1: Use the person's face and build from IMAGE 1.
+        - SOURCE 2: Use the clothing from IMAGE 2.
+        - ENVIRONMENT: Replace the background with a clean, high-end, minimalist professional photography studio background with soft lighting.
       `;
       break;
     case 'keep-garment-bg':
       modeSpecificPrompt = `
-        - **MANDATORY CANVAS**: Use **IMAGE 2** (Garment/Model) as the base layer.
-        - **IDENTITY TRANSFER**: Keep the background and the clothes in **IMAGE 2** exactly as they are. 
-        - **FACE SWAP**: Only replace the face of the person in **IMAGE 2** with the face of the person from **IMAGE 1**.
+        - GOAL: Face-Swap onto a model in a specific scene.
+        - SOURCE 1 (Person): Use 100% of the facial features, skin tone, and identity from IMAGE 1.
+        - SOURCE 2 (Scene): IMAGE 2 is the MASTER for background, clothing, and environment.
+        - TASK: Take the person's head from IMAGE 1 and place it onto the body/model in IMAGE 2.
+        - CONSTRAINT: Retain 100% of the original clothing, outfit, and background from IMAGE 2.
       `;
       break;
   }
 
   const basePrompt = `
-    Role: Professional AI Fashion Retoucher.
-    
+    You are a professional digital fashion editor. 
     ${modeSpecificPrompt}
     
-    Technical Details:
-    - Result must be photorealistic, 100% natural fabric folds and lighting.
-    - Give the person a very gentle, friendly smile (mỉm cười nhẹ nhàng).
-    - Resolution: ${imageSize}.
-    ${instructions ? `- User note: ${instructions}` : ''}
+    GUIDELINES:
+    1. Result must be highly photorealistic.
+    2. Seamless blending of skin tones.
+    3. Realistic fabric rendering.
+    4. Aspect Ratio: ${aspectRatio}.
+    ${instructions ? `5. Additional modification: ${instructions}` : ''}
+    
+    OUTPUT: Provide only the final edited image.
   `;
 
   const parts: any[] = [
@@ -155,8 +182,19 @@ const executeSingleTryOn = async (
   parts.push({ text: basePrompt });
 
   try {
-    const config: any = { imageConfig: { aspectRatio: aspectRatio } };
-    if (modelName === 'gemini-3-pro-image-preview') config.imageConfig.imageSize = imageSize;
+    const config: any = { 
+      imageConfig: { aspectRatio },
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+      ]
+    };
+    
+    if (modelName === 'gemini-3-pro-image-preview') {
+        config.imageConfig.imageSize = imageSize;
+    }
 
     const response = await retry<GenerateContentResponse>(() => ai.models.generateContent({
       model: modelName,
@@ -166,8 +204,7 @@ const executeSingleTryOn = async (
     
     return extractImageFromResponse(response);
   } catch (error: any) {
-    console.warn("Try-on generation failed:", error);
-    return null;
+    throw error;
   }
 };
 
@@ -181,20 +218,42 @@ export const generateVirtualTryOn = async (
   imageSize: string = "2K",
   modelName: string = "gemini-3-pro-image-preview",
   tryOnMode: string = 'keep-model-bg',
-  count: number = 2 // New parameter to control batch count
+  count: number = 1
 ): Promise<string[]> => {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("Thiếu API Key.");
 
-  // Create an array of tasks based on the count requested
-  const tasks = Array.from({ length: count }).map(() => 
-    executeSingleTryOn(personImage, garmentImage, garmentDetailImage, accessoryImage, instructions, aspectRatio, imageSize, modelName, tryOnMode)
-  );
+  const tasks = [];
+  for (let i = 0; i < count; i++) {
+    tasks.push(executeSingleTryOn(
+      personImage, 
+      garmentImage, 
+      garmentDetailImage, 
+      accessoryImage, 
+      instructions, 
+      aspectRatio, 
+      imageSize, 
+      modelName, 
+      tryOnMode
+    ));
+  }
   
-  const results = await Promise.all(tasks);
-  const validResults = results.filter((r): r is string => r !== null);
+  const results = await Promise.allSettled(tasks);
+  const validResults: string[] = [];
+  let lastErrorMsg = "";
 
-  if (validResults.length === 0) throw new Error("Google AI không thể tạo ảnh. Vui lòng thử lại.");
+  results.forEach((res) => {
+    if (res.status === 'fulfilled' && res.value) {
+      validResults.push(res.value);
+    } else if (res.status === 'rejected') {
+      lastErrorMsg = res.reason?.message || "Lỗi hệ thống.";
+    }
+  });
+
+  if (validResults.length === 0) {
+    throw new Error(lastErrorMsg || "Không thể tạo ảnh.");
+  }
+
   return validResults;
 };
 
@@ -211,19 +270,22 @@ export const changeImageBackground = async (
   if (!apiKey) throw new Error("Thiếu API Key.");
   const ai = new GoogleGenAI({ apiKey });
 
-  const prompt = `
-    Replace background of image.
-    Keep subject identical. Natural gentle smile.
-    ${customBgImage ? 'Use custom background provided.' : `Theme: ${backgroundPrompt}`}
-  `;
-
+  const prompt = `Keep the subject identical. Replace background with: ${customBgImage ? 'the environment from the reference' : backgroundPrompt}.`;
   const parts: any[] = [{ inlineData: { mimeType: 'image/png', data: cleanBase64(imageDataUrl) } }];
   if (detailImage) parts.push({ inlineData: { mimeType: detailImage.mimeType, data: cleanBase64(detailImage.data) } });
   if (customBgImage) parts.push({ inlineData: { mimeType: customBgImage.mimeType, data: cleanBase64(customBgImage.data) } });
   parts.push({ text: prompt });
 
   try {
-    const config: any = { imageConfig: { aspectRatio } };
+    const config: any = { 
+      imageConfig: { aspectRatio },
+      safetySettings: [
+        { category: 'HARM_CATEGORY_HATE_SPEECH', threshold: 'BLOCK_ONLY_HIGH' },
+        { category: 'HARM_CATEGORY_HARASSMENT', threshold: 'BLOCK_ONLY_HIGH' },
+        { category: 'HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold: 'BLOCK_ONLY_HIGH' },
+        { category: 'HARM_CATEGORY_DANGEROUS_CONTENT', threshold: 'BLOCK_ONLY_HIGH' },
+      ]
+    };
     if (modelName === 'gemini-3-pro-image-preview') config.imageConfig.imageSize = imageSize;
     const response = await ai.models.generateContent({ model: modelName, contents: { parts }, config });
     return extractImageFromResponse(response);
@@ -243,30 +305,13 @@ export const changeImageBackgroundBatch = async (
   return results.filter((r): r is string => r !== null);
 };
 
-export const changeImageBackgroundAndPoseBatch = async (
-  imageDataUrl: string,
-  configs: { background: string; pose: string }[],
-  detailImage: ImageAsset | null = null,
-  aspectRatio: string = "9:16",
-  imageSize: string = "2K",
-  modelName: string = "gemini-3-pro-image-preview",
-  customBgImage: ImageAsset | null = null
-): Promise<string[]> => [];
-
-export const changeImagePose = async (
-  imageDataUrl: string,
-  posePrompt: string,
-  modelName: string = "gemini-3-pro-image-preview"
-): Promise<string> => "";
-
 export const analyzeOutfit = async (image: ImageAsset, detailImage: ImageAsset | null): Promise<string> => {
   const apiKey = getApiKey();
   if (!apiKey) throw new Error("Thiếu API Key.");
   const ai = new GoogleGenAI({ apiKey });
   const parts: any[] = [{ inlineData: { mimeType: image.mimeType, data: cleanBase64(image.data) } }];
   if (detailImage) parts.push({ inlineData: { mimeType: detailImage.mimeType, data: cleanBase64(detailImage.data) } });
-  parts.push({ text: "Analyze person and outfit details." });
-
+  parts.push({ text: "Describe this outfit for high-quality video generation." });
   const response = await ai.models.generateContent({ model: 'gemini-3-pro-preview', contents: { parts } });
   return response.text || "";
 };
@@ -279,7 +324,7 @@ export const generatePromptsFromAnalysis = async (analysis: string, count: numbe
     model: 'gemini-3-pro-preview',
     contents: analysis,
     config: {
-      systemInstruction: `Generate ${count} video prompts. JSON format.`,
+      systemInstruction: `Generate ${count} video motion prompts. Return JSON { "prompts": [] }.`,
       responseMimeType: 'application/json',
       responseSchema: {
         type: Type.OBJECT,

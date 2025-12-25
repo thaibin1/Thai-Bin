@@ -2,9 +2,9 @@
 import React, { useState, useEffect } from 'react';
 import { UploadBox } from './components/UploadBox';
 import { ResultDisplay } from './components/ResultDisplay';
-import { generateVirtualTryOn, changeImageBackground, changeImageBackgroundBatch, changeImageBackgroundAndPoseBatch, changeImagePose, analyzeOutfit, generatePromptsFromAnalysis, setManualApiKey, clearManualApiKey } from './services/geminiService';
+import { generateVirtualTryOn, changeImageBackground, changeImageBackgroundBatch, analyzeOutfit, generatePromptsFromAnalysis, setManualApiKey, clearManualApiKey } from './services/geminiService';
 import { ImageAsset, GenerationStatus } from './types';
-import { Sparkles, Shirt, User, ArrowRight, Key, ExternalLink, LogOut, Lock, Image as ImageIcon, Layers, Dices, Copy, CheckSquare, Loader2, Video, Check, ShoppingBag, RefreshCw, X, Monitor, Smartphone, Maximize2, Square, Gem, Cpu, Anchor, Bookmark, Trash2, Library, Hash, Layout } from 'lucide-react';
+import { Sparkles, Shirt, User, LogOut, Lock, Image as ImageIcon, Layout, Copy, Loader2, Video, Check, RefreshCw, X, Monitor, Smartphone, Square, Cpu, Bookmark, Library, Hash, Key } from 'lucide-react';
 
 // --- Constants ---
 const STORAGE_KEY_MODELS = 'swapnet_saved_models';
@@ -24,9 +24,24 @@ const IMAGE_SIZES = [
 ];
 
 const TRY_ON_MODES = [
-  { id: 'keep-model-bg', label: 'Giữ nền Người mẫu', desc: 'Mặc đồ vào mẫu, giữ nguyên cảnh cũ', icon: <User size={14} /> },
-  { id: 'new-bg', label: 'Đổi nền Studio', desc: 'Thay bằng bối cảnh studio chuyên nghiệp', icon: <Sparkles size={14} /> },
-  { id: 'keep-garment-bg', label: 'Giữ nền Trang phục', desc: 'Lấy bối cảnh từ ảnh quần áo/mẫu đồ', icon: <Shirt size={14} /> },
+  { 
+    id: 'keep-model-bg', 
+    label: '1. Mặc đồ & Giữ nền người mẫu', 
+    desc: 'Giữ nguyên người mẫu và phông nền gốc của ảnh người mẫu, chỉ thay trang phục.', 
+    icon: <User size={14} /> 
+  },
+  { 
+    id: 'new-bg', 
+    label: '2. Mặc đồ & Thay nền Studio', 
+    desc: 'Giữ nguyên người mẫu, thay trang phục mới và đổi phông nền studio chuyên nghiệp.', 
+    icon: <Sparkles size={14} /> 
+  },
+  { 
+    id: 'keep-garment-bg', 
+    label: '3. Ghép mặt & Giữ nền trang phục', 
+    desc: 'Lấy khuôn mặt từ ảnh người mẫu để ghép vào ảnh trang phục, giữ nguyên phông nền ảnh trang phục.', 
+    icon: <Shirt size={14} /> 
+  },
 ];
 
 const App: React.FC = () => {
@@ -47,7 +62,7 @@ const App: React.FC = () => {
   const [instructions, setInstructions] = useState('');
   const [tryOnAspectRatio, setTryOnAspectRatio] = useState<string>("9:16");
   const [tryOnImageSize, setTryOnImageSize] = useState<string>("2K");
-  const [tryOnCount, setTryOnCount] = useState<number>(2);
+  const [tryOnCount, setTryOnCount] = useState<number>(1);
   const [tryOnMode, setTryOnMode] = useState<string>('keep-model-bg');
   
   const [tryOnStatus, setTryOnStatus] = useState<GenerationStatus>(GenerationStatus.IDLE);
@@ -75,7 +90,6 @@ const App: React.FC = () => {
   const [veoStatus, setVeoStatus] = useState<GenerationStatus>(GenerationStatus.IDLE);
   const [veoError, setVeoError] = useState<string | null>(null);
 
-  // Initial load
   useEffect(() => {
     const checkKey = async () => {
       const storedKey = localStorage.getItem('gemini_api_key');
@@ -92,7 +106,6 @@ const App: React.FC = () => {
     };
     checkKey();
     
-    // Load saved models from LocalStorage
     const stored = localStorage.getItem(STORAGE_KEY_MODELS);
     if (stored) {
       try {
@@ -148,10 +161,6 @@ const App: React.FC = () => {
     setVeoAnalysis(null);
   };
 
-  const handleTabChange = (tab: 'try-on' | 'background' | 'veo-prompt') => {
-    setActiveTab(tab);
-  };
-
   const processFile = (file: File): Promise<ImageAsset> => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -172,7 +181,6 @@ const App: React.FC = () => {
     });
   };
 
-  // --- MODEL LIBRARY LOGIC ---
   const saveCurrentModel = () => {
     if (!personImage) return;
     const exists = savedModels.some(m => m.data.substring(0, 100) === personImage.data.substring(0, 100));
@@ -200,26 +208,11 @@ const App: React.FC = () => {
     }
   };
 
-  const handlePersonUpload = async (file: File) => {
-    try {
-      const asset = await processFile(file);
-      setPersonImage(asset);
-    } catch (err) { console.error(err); }
-  };
-
-  const handleGarmentUpload = async (file: File) => {
-    try {
-      const asset = await processFile(file);
-      setGarmentImage(asset);
-    } catch (err) { console.error(err); }
-  };
-
   const handleGenerateTryOn = async () => {
     if (!personImage || (!garmentImage && !accessoryImage)) return;
     setTryOnStatus(GenerationStatus.PROCESSING);
     setTryOnError(null);
     try {
-      // FIX: Call the service once with tryOnCount, do NOT use .map() here
       const results = await generateVirtualTryOn(
         personImage, 
         garmentImage, 
@@ -230,7 +223,7 @@ const App: React.FC = () => {
         tryOnImageSize, 
         modelName, 
         tryOnMode,
-        tryOnCount // Pass count directly to service
+        tryOnCount
       );
       setTryOnResult(results);
       setTryOnStatus(GenerationStatus.COMPLETED);
@@ -334,14 +327,14 @@ const App: React.FC = () => {
       <main className="flex-grow max-w-7xl mx-auto w-full px-4 py-8">
         <div className="flex justify-center mb-8 overflow-x-auto">
           <div className="bg-surface/50 p-1 rounded-xl border border-gray-800 flex gap-1 whitespace-nowrap">
-            <button onClick={() => handleTabChange('try-on')} className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all duration-200 ${activeTab === 'try-on' ? 'bg-gradient-to-r from-primary/20 to-secondary/20 text-white border border-primary/30' : 'text-gray-400 hover:text-white'}`}>
+            <button onClick={() => setActiveTab('try-on')} className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all duration-200 ${activeTab === 'try-on' ? 'bg-gradient-to-r from-primary/20 to-secondary/20 text-white border border-primary/30' : 'text-gray-400 hover:text-white'}`}>
               <Shirt size={18} /> Thử Đồ AI
             </button>
-            <button onClick={() => handleTabChange('background')} className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all duration-200 ${activeTab === 'background' ? 'bg-gradient-to-r from-primary/20 to-secondary/20 text-white border border-primary/30' : 'text-gray-400 hover:text-white'}`}>
+            <button onClick={() => setActiveTab('background')} className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all duration-200 ${activeTab === 'background' ? 'bg-gradient-to-r from-primary/20 to-secondary/20 text-white border border-primary/30' : 'text-gray-400 hover:text-white'}`}>
               <ImageIcon size={18} /> Đổi Background
             </button>
-            <button onClick={() => handleTabChange('veo-prompt')} className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all duration-200 ${activeTab === 'veo-prompt' ? 'bg-gradient-to-r from-primary/20 to-secondary/20 text-white border border-primary/30' : 'text-gray-400 hover:text-white'}`}>
-              <Video size={18} /> Prompt Veo 3
+            <button onClick={() => setActiveTab('veo-prompt')} className={`flex items-center gap-2 px-6 py-3 rounded-lg font-medium transition-all duration-200 ${activeTab === 'veo-prompt' ? 'bg-gradient-to-r from-primary/20 to-secondary/20 text-white border border-primary/30' : 'text-gray-400 hover:text-white'}`}>
+              <Video size={18} /> Prompt Video
             </button>
           </div>
         </div>
@@ -362,13 +355,13 @@ const App: React.FC = () => {
                         </button>
                     )}
                   </div>
-                  <UploadBox label="Tải lên người mẫu" description="Ảnh chân dung hoặc toàn thân" image={personImage} onImageSelected={handlePersonUpload} onClear={() => setPersonImage(null)} disabled={tryOnStatus === GenerationStatus.PROCESSING} />
+                  <UploadBox label="Người mẫu" description="Ảnh chân dung hoặc toàn thân" image={personImage} onImageSelected={(f) => processFile(f).then(setPersonImage)} onClear={() => setPersonImage(null)} disabled={tryOnStatus === GenerationStatus.PROCESSING} />
 
                   {savedModels.length > 0 && (
                       <div className="mt-6 pt-6 border-t border-gray-800">
                           <div className="flex items-center gap-2 mb-4 text-gray-400">
                               <Library size={16} />
-                              <span className="text-xs font-bold uppercase tracking-widest">Thư viện của bạn</span>
+                              <span className="text-xs font-bold uppercase tracking-widest">Thư viện mẫu</span>
                           </div>
                           <div className="flex gap-3 overflow-x-auto pb-2 custom-scrollbar">
                               {savedModels.map((model) => (
@@ -382,58 +375,44 @@ const App: React.FC = () => {
                   )}
                 </div>
 
-                {/* Try-on Mode Selection */}
-                <div className="bg-surface/50 p-6 rounded-2xl border border-gray-800 shadow-xl">
-                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-4 flex items-center gap-2">
-                        <Layout size={14} /> Chế độ hòa trộn
+                <div className="bg-surface/50 p-6 rounded-2xl border border-gray-800 shadow-xl space-y-4">
+                    <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-2 flex items-center gap-2">
+                        <Layout size={14} /> Chế độ thực hiện
                     </label>
-                    <div className="grid grid-cols-1 gap-3">
+                    <div className="grid grid-cols-1 gap-2">
                         {TRY_ON_MODES.map((mode) => (
                             <button
                                 key={mode.id}
                                 onClick={() => setTryOnMode(mode.id)}
-                                className={`flex items-center gap-4 p-4 rounded-xl border text-left transition-all ${tryOnMode === mode.id ? 'bg-primary/10 border-primary shadow-lg shadow-primary/5' : 'bg-dark border-gray-800 hover:border-gray-600'}`}
+                                className={`flex items-center gap-3 p-3 rounded-xl border text-left transition-all ${tryOnMode === mode.id ? 'bg-primary/10 border-primary shadow-sm shadow-primary/5' : 'bg-dark border-gray-800 hover:border-gray-700'}`}
                             >
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${tryOnMode === mode.id ? 'bg-primary text-white' : 'bg-gray-800 text-gray-400'}`}>
+                                <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center ${tryOnMode === mode.id ? 'bg-primary text-white' : 'bg-gray-800 text-gray-500'}`}>
                                     {mode.icon}
                                 </div>
-                                <div className="flex-1">
-                                    <p className={`text-sm font-bold ${tryOnMode === mode.id ? 'text-white' : 'text-gray-300'}`}>{mode.label}</p>
-                                    <p className="text-[10px] text-gray-500 mt-0.5">{mode.desc}</p>
+                                <div className="flex-1 overflow-hidden">
+                                    <p className={`text-xs font-bold truncate ${tryOnMode === mode.id ? 'text-white' : 'text-gray-300'}`}>{mode.label}</p>
+                                    <p className="text-[10px] text-gray-500 mt-0.5 leading-tight truncate">{mode.desc}</p>
                                 </div>
-                                {tryOnMode === mode.id && <div className="w-2 h-2 rounded-full bg-primary animate-pulse"></div>}
+                                {tryOnMode === mode.id && <Check size={14} className="text-primary" />}
                             </button>
                         ))}
                     </div>
                 </div>
 
-                {/* Configuration Panel */}
                 <div className="bg-surface/50 p-6 rounded-2xl border border-gray-800 shadow-xl space-y-6">
-                   <div>
-                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-3">Tỉ lệ khung hình</label>
-                     <div className="grid grid-cols-5 gap-2">
-                       {ASPECT_RATIOS.map((ratio) => (
-                         <button key={ratio.value} onClick={() => setTryOnAspectRatio(ratio.value)} className={`flex flex-col items-center gap-1.5 py-2.5 rounded-lg border transition-all ${tryOnAspectRatio === ratio.value ? 'bg-primary/20 border-primary text-white' : 'bg-dark border-gray-700 text-gray-500 hover:border-gray-500'}`}>
-                            {ratio.icon}
-                            <span className="text-[10px] font-medium">{ratio.label}</span>
-                         </button>
-                       ))}
-                     </div>
-                   </div>
-
                    <div className="grid grid-cols-2 gap-6">
                      <div>
-                       <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-3">Chất lượng ảnh</label>
-                       <div className="flex gap-2">
-                         {IMAGE_SIZES.map((size) => (
-                           <button key={size.value} onClick={() => setTryOnImageSize(size.value)} className={`flex-1 py-2 rounded-lg border transition-all ${tryOnImageSize === size.value ? 'bg-secondary/20 border-secondary text-white' : 'bg-dark border-gray-700 text-gray-500'}`}>
-                              <span className="text-xs font-bold">{size.value}</span>
-                           </button>
-                         ))}
+                       <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-3">Tỉ lệ ảnh</label>
+                       <div className="grid grid-cols-5 gap-1">
+                        {ASPECT_RATIOS.map((ratio) => (
+                          <button key={ratio.value} onClick={() => setTryOnAspectRatio(ratio.value)} className={`flex items-center justify-center p-2 rounded-lg border transition-all ${tryOnAspectRatio === ratio.value ? 'bg-primary/20 border-primary text-white' : 'bg-dark border-gray-700 text-gray-500 hover:border-gray-500'}`} title={ratio.label}>
+                              {ratio.icon}
+                          </button>
+                        ))}
                        </div>
                      </div>
                      <div>
-                       <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-3">Số lượng ảnh</label>
+                       <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-3">Số lượng</label>
                        <div className="flex gap-2">
                          {[1, 2, 4].map((n) => (
                            <button key={n} onClick={() => setTryOnCount(n)} className={`flex-1 py-2 rounded-lg border transition-all ${tryOnCount === n ? 'bg-indigo-500/20 border-indigo-500 text-white' : 'bg-dark border-gray-700 text-gray-500'}`}>
@@ -447,10 +426,10 @@ const App: React.FC = () => {
 
                 <div className="bg-surface/50 p-6 rounded-2xl border border-gray-800 shadow-xl">
                   <div className="flex items-center gap-2 mb-6 text-secondary"><Shirt size={20} /><h3 className="text-lg font-semibold">2. Chọn trang phục</h3></div>
-                  <UploadBox label="Ảnh trang phục" description="Ảnh phẳng hoặc ảnh mẫu" image={garmentImage} onImageSelected={handleGarmentUpload} onClear={() => setGarmentImage(null)} disabled={tryOnStatus === GenerationStatus.PROCESSING} />
+                  <UploadBox label="Trang phục" description="Tải lên mẫu áo/quần/váy" image={garmentImage} onImageSelected={(f) => processFile(f).then(setGarmentImage)} onClear={() => setGarmentImage(null)} disabled={tryOnStatus === GenerationStatus.PROCESSING} />
                 </div>
                 <button onClick={handleGenerateTryOn} disabled={!personImage || (!garmentImage && !accessoryImage) || tryOnStatus === GenerationStatus.PROCESSING} className="w-full py-4 px-6 rounded-xl font-bold text-lg bg-gradient-to-r from-primary to-secondary text-white shadow-lg flex items-center justify-center gap-3 transition-all transform hover:scale-[1.01]">
-                  <Sparkles size={20} className={tryOnStatus === GenerationStatus.PROCESSING ? 'animate-spin' : ''} /> {tryOnStatus === GenerationStatus.PROCESSING ? `Đang tạo ${tryOnCount} ảnh...` : 'Hoán đổi ngay'}
+                  <Sparkles size={20} className={tryOnStatus === GenerationStatus.PROCESSING ? 'animate-spin' : ''} /> {tryOnStatus === GenerationStatus.PROCESSING ? `Đang tạo ${tryOnCount} ảnh...` : 'Bắt đầu hoán đổi'}
                 </button>
                 </>
              )}
@@ -460,8 +439,6 @@ const App: React.FC = () => {
                   <div className="bg-surface/50 p-6 rounded-2xl border border-gray-800 shadow-xl">
                     <UploadBox label="Ảnh gốc" description="Tải ảnh cần đổi nền" image={bgInputImage} onImageSelected={(f) => processFile(f).then(setBgInputImage)} onClear={() => setBgInputImage(null)} />
                   </div>
-
-                  {/* Config for BG */}
                   <div className="bg-surface/50 p-6 rounded-2xl border border-gray-800 shadow-xl space-y-4">
                      <div>
                        <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-3">Tỉ lệ & Chất lượng</label>
@@ -487,9 +464,8 @@ const App: React.FC = () => {
                        </div>
                      </div>
                   </div>
-
                   <div className="bg-surface/50 p-6 rounded-2xl border border-gray-800 shadow-xl">
-                    <textarea value={bgPrompt} onChange={(e) => setBgPrompt(e.target.value)} placeholder="Mô tả nền mới (VD: Bãi biển, Studio...)" className="w-full bg-dark border border-gray-700 rounded-lg p-3 text-sm h-24 outline-none focus:ring-1 focus:ring-secondary" />
+                    <textarea value={bgPrompt} onChange={(e) => setBgPrompt(e.target.value)} placeholder="Mô tả nền mới (VD: Bãi biển, Studio, Đường phố...)" className="w-full bg-dark border border-gray-700 rounded-lg p-3 text-sm h-24 outline-none focus:ring-1 focus:ring-secondary" />
                   </div>
                   <button onClick={handleGenerateBackground} disabled={!bgInputImage || bgStatus === GenerationStatus.PROCESSING} className="w-full py-4 bg-secondary text-white rounded-xl font-bold shadow-lg">Đổi Background</button>
                 </div>
@@ -500,7 +476,6 @@ const App: React.FC = () => {
                   <div className="bg-surface/50 p-6 rounded-2xl border border-gray-800 shadow-xl">
                     <UploadBox label="Ảnh mẫu" description="Tải ảnh để phân tích prompt" image={veoImage} onImageSelected={(f) => processFile(f).then(setVeoImage)} onClear={() => setVeoImage(null)} />
                   </div>
-                  
                   <div className="bg-surface/50 p-6 rounded-2xl border border-gray-800 shadow-xl">
                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-4">Số lượng Prompt cần tạo</label>
                     <div className="flex gap-3">
@@ -512,7 +487,6 @@ const App: React.FC = () => {
                       ))}
                     </div>
                   </div>
-
                   <button onClick={handleGenerateVeoPrompt} disabled={!veoImage || veoStatus === GenerationStatus.PROCESSING} className="w-full py-4 bg-white text-black rounded-xl font-bold shadow-lg flex items-center justify-center gap-2">
                     {veoStatus === GenerationStatus.PROCESSING ? <Loader2 size={20} className="animate-spin" /> : <Video size={20} />}
                     Viết Prompt Video
@@ -528,7 +502,7 @@ const App: React.FC = () => {
                   resultUrl={activeTab === 'try-on' ? tryOnResult : (activeTab === 'background' ? bgResult : null)} 
                   error={activeTab === 'try-on' ? tryOnError : (activeTab === 'background' ? bgError : veoError)}
                   onReset={() => resetAll()}
-                  onEditBackground={(p, idx) => activeTab === 'try-on' ? handleGenerateTryOn() : {}} 
+                  onEditBackground={(p, idx) => {}} 
                   onEditPose={() => {}}
                 />
                 {activeTab === 'veo-prompt' && veoPrompts.length > 0 && (
