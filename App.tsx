@@ -400,7 +400,7 @@ const App: React.FC = () => {
                 </div>
 
                 <div className="bg-surface/50 p-6 rounded-2xl border border-gray-800 shadow-xl space-y-6">
-                   <div className="grid grid-cols-2 gap-6">
+                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
                      <div>
                        <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-3">Tỉ lệ ảnh</label>
                        <div className="grid grid-cols-5 gap-1">
@@ -422,6 +422,22 @@ const App: React.FC = () => {
                        </div>
                      </div>
                    </div>
+                   
+                   <div>
+                     <label className="text-xs font-bold text-gray-500 uppercase tracking-widest block mb-3">Chất lượng ảnh (Resolution)</label>
+                     <div className="flex gap-2">
+                        {IMAGE_SIZES.map((size) => (
+                          <button 
+                            key={size.value} 
+                            onClick={() => setTryOnImageSize(size.value)} 
+                            className={`flex-1 flex flex-col items-center justify-center py-2 px-1 rounded-xl border transition-all ${tryOnImageSize === size.value ? 'bg-secondary/20 border-secondary text-white' : 'bg-dark border-gray-700 text-gray-500 hover:border-gray-600'}`}
+                          >
+                             <span className="text-xs font-bold">{size.value}</span>
+                             <span className="text-[9px] opacity-70">{size.desc}</span>
+                          </button>
+                        ))}
+                     </div>
+                   </div>
                 </div>
 
                 <div className="bg-surface/50 p-6 rounded-2xl border border-gray-800 shadow-xl">
@@ -429,7 +445,7 @@ const App: React.FC = () => {
                   <UploadBox label="Trang phục" description="Tải lên mẫu áo/quần/váy" image={garmentImage} onImageSelected={(f) => processFile(f).then(setGarmentImage)} onClear={() => setGarmentImage(null)} disabled={tryOnStatus === GenerationStatus.PROCESSING} />
                 </div>
                 <button onClick={handleGenerateTryOn} disabled={!personImage || (!garmentImage && !accessoryImage) || tryOnStatus === GenerationStatus.PROCESSING} className="w-full py-4 px-6 rounded-xl font-bold text-lg bg-gradient-to-r from-primary to-secondary text-white shadow-lg flex items-center justify-center gap-3 transition-all transform hover:scale-[1.01]">
-                  <Sparkles size={20} className={tryOnStatus === GenerationStatus.PROCESSING ? 'animate-spin' : ''} /> {tryOnStatus === GenerationStatus.PROCESSING ? `Đang tạo ${tryOnCount} ảnh...` : 'Bắt đầu hoán đổi'}
+                  <Sparkles size={20} className={tryOnStatus === GenerationStatus.PROCESSING ? 'animate-spin' : ''} /> {tryOnStatus === GenerationStatus.PROCESSING ? `Đang tạo ${tryOnCount} ảnh ${tryOnImageSize}...` : 'Bắt đầu hoán đổi'}
                 </button>
                 </>
              )}
